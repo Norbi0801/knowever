@@ -5,5 +5,5 @@ feeds/*.jsonl
 actual_process_feed/*
 tmp/
 sources.yaml
-.idea/
+.idea
 knowever_rss_digest.egg-info
