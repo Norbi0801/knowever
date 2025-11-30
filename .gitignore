@@ -1,0 +1,9 @@
+.env
+*.jsonl
+.venv
+feeds/*.jsonl
+actual_process_feed/*
+tmp/
+sources.yaml
+.idea/
+knowever_rss_digest.egg-info
