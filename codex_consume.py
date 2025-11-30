@@ -15,10 +15,25 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+import os
+from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent
-PROCESS_DIR = BASE_DIR / "actual_process_feed"
+
+dotenv_path = BASE_DIR / ".env"
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
+
+
+def get_process_dir() -> Path:
+    pd = os.getenv("PROCESS_DIR")
+    if pd:
+        return Path(pd).resolve()
+    return BASE_DIR / "actual_process_feed"
+
+
+PROCESS_DIR = get_process_dir()
 PROMPT_PATH = BASE_DIR / "prompt.md"
 
 

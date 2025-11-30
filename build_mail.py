@@ -1,32 +1,25 @@
 """
 Buduje finalną treść maila na podstawie:
 
-- `actual_process_feed/article.json`  (dane wpisu RSS),
-- `actual_process_feed/output.html`   (zredagowana treść od Codexa),
+- listy wpisów (dict) przygotowanych do digestu,
 - szablonu `email_template.html`.
 
-Zamiast zapisywać plik, wysyła mail na adres
-`norbertolkowski@gmail.com`.
-
-Temat maila:
-    [NEWSFEED] [SOURCE] - title
-
-Ustawienia SMTP pobiera ze zmiennych środowiskowych:
+Ustawienia SMTP ze zmiennych środowiskowych:
 - SMTP_HOST (domyślnie: smtp.gmail.com)
 - SMTP_PORT (domyślnie: 587)
 - SMTP_USER (wymagane)
 - SMTP_PASS (wymagane)
 - SMTP_FROM (domyślnie: SMTP_USER)
+- SMTP_TO (domyślnie: norbertolkowski@gmail.com)
 """
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
 from email.message import EmailMessage
 from pathlib import Path
 import os
 import smtplib
+from typing import List, Dict
 
 from dotenv import load_dotenv
 
@@ -40,21 +33,6 @@ if dotenv_path.exists():
     load_dotenv(dotenv_path)
 PROCESS_DIR = BASE_DIR / "actual_process_feed"
 TEMPLATE_PATH = BASE_DIR / "email_template.html"
-ARTICLE_PATH = PROCESS_DIR / "article.json"
-CONTENT_PATH = PROCESS_DIR / "output.html"
-
-
-def load_article() -> dict:
-    if not ARTICLE_PATH.exists():
-        raise FileNotFoundError(f"Brak pliku {ARTICLE_PATH}")
-    with ARTICLE_PATH.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def load_content_html() -> str:
-    if not CONTENT_PATH.exists():
-        raise FileNotFoundError(f"Brak pliku {CONTENT_PATH} – uruchom najpierw Codexa, żeby wygenerować output.html.")
-    return CONTENT_PATH.read_text(encoding="utf-8")
 
 
 def load_template() -> str:
@@ -63,50 +41,82 @@ def load_template() -> str:
     return TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
-def build_mail_html() -> tuple[str, dict]:
-    article = load_article()
-    content_html = load_content_html()
+def build_mail_html(
+    items: List[Dict],
+    digest_title: str,
+    digest_time: str,
+    include_ai_content: bool = True,
+) -> tuple[str, dict]:
+    """Renderuje HTML dla wielu wpisów (digest lub pojedynczy)."""
     template = load_template()
 
-    title = article.get("title") or "Bez tytułu"
-    published = article.get("published") or ""
-    # Fallback na aktualny czas, jeśli brak daty w artykule
-    if not published:
-        published = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    # Zbiorcze TL;DR: lista tytułów
+    summary_lines = []
+    for idx, item in enumerate(items, start=1):
+        title = item.get("title") or "Bez tytułu"
+        source = item.get("source") or "?"
+        summary_lines.append(f"{idx}. [{source}] {title}")
+    summary_text = "<br>".join(summary_lines) if summary_lines else "Brak wpisów w dzisiejszym digestzie."
 
-    source = article.get("source") or "Nieznane źródło"
-    url = article.get("url") or ""
+    # Treść dla każdego wpisu
+    item_blocks = []
+    for item in items:
+        title = item.get("title") or "Bez tytułu"
+        url = item.get("url") or ""
+        source = item.get("source") or "?"
+        published = item.get("published") or ""
+        content_html = item.get("content_html") or ""
+        if not include_ai_content:
+            # fallback: krótki opis z summary lub content (jeśli dostępny)
+            content_html = item.get("summary") or ""
+            if not content_html and item.get("content"):
+                content_html = str(item["content"])[:500] + "..."
+            if content_html:
+                content_html = f"<p>{content_html}</p>"
+        score = item.get("score", 0)
 
-    raw_summary = article.get("summary") or ""
-    # Lekki fallback: jeśli summary jest puste, spróbuj wziąć początek contentu
-    if not raw_summary and article.get("content"):
-        raw_summary = str(article["content"])[:280] + "..."
+        block = f"""
+        <div style="margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid #e5e7eb;">
+          <h2 style="font-size:18px; margin:0 0 6px 0;">{title}</h2>
+          <div style="font-size:12px; color:#6b7280; margin-bottom:8px;">
+            <span>{source}</span> • <span>{published}</span> • <span>score: {score:.1f}</span>
+          </div>
+          <div style="font-size:14px; color:#111827; margin-bottom:10px;">
+            {content_html}
+          </div>
+          <div style="font-size:13px;"><a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a></div>
+        </div>
+        """
+        item_blocks.append(block)
+
+    content_html = "\n".join(item_blocks)
+
+    url_placeholder = items[0].get("url") if items else "https://"
 
     mail_html = template
-    mail_html = mail_html.replace("{{title}}", title)
-    mail_html = mail_html.replace("{{time}}", published)
-    mail_html = mail_html.replace("{{source}}", source)
-    mail_html = mail_html.replace("{{url}}", url)
-    mail_html = mail_html.replace("{{summary}}", raw_summary)
+    mail_html = mail_html.replace("{{title}}", digest_title)
+    mail_html = mail_html.replace("{{time}}", digest_time)
+    mail_html = mail_html.replace("{{source}}", "Daily Digest")
+    mail_html = mail_html.replace("{{url}}", url_placeholder or "#")
+    mail_html = mail_html.replace("{{summary}}", summary_text)
     mail_html = mail_html.replace("{{content_html}}", content_html)
 
     meta = {
-        "title": title,
-        "source": source,
-        "url": url,
-        "published": published,
+        "title": digest_title,
+        "source": "Daily Digest",
+        "published": digest_time,
     }
 
     return mail_html, meta
 
 
-def send_mail(html: str, meta: dict) -> None:
+def send_mail(html: str, subject: str) -> None:
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
     smtp_from = os.getenv("SMTP_FROM") or smtp_user
-    smtp_to = "norbertolkowski@gmail.com"
+    smtp_to = os.getenv("SMTP_TO", "norbertolkowski@gmail.com")
 
     if not smtp_user or not smtp_pass:
         raise RuntimeError(
@@ -116,7 +126,7 @@ def send_mail(html: str, meta: dict) -> None:
     if not smtp_from:
         raise RuntimeError("Nie udało się ustalić adresu nadawcy (SMTP_FROM / SMTP_USER).")
 
-    subject = f"[NEWSFEED] [{meta.get('source', 'Unknown')}] - {meta.get('title', 'Bez tytułu')}"
+    subject = subject or "[NEWSFEED]"
 
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -133,8 +143,7 @@ def send_mail(html: str, meta: dict) -> None:
 
 
 def main() -> None:
-    html, meta = build_mail_html()
-    send_mail(html, meta)
+    print("Uruchom send_digest.py, aby zbudować i wysłać dzienny digest.")
 
 
 if __name__ == "__main__":

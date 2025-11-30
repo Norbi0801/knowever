@@ -26,3 +26,8 @@ dist/
 build/
 __pycache__/
 *.pyc
+
+day.lock
+logs/
+plan.md
+profile.yaml

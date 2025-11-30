@@ -10,6 +10,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from urllib.parse import urljoin
+from urllib.parse import urlparse
+from datetime import datetime, timezone
+import time
+import os
+from dotenv import load_dotenv
 
 import requests
 from bs4 import BeautifulSoup
@@ -17,9 +22,24 @@ from bs4.element import Tag
 
 
 BASE_DIR = Path(__file__).resolve().parent
-PROCESS_DIR = BASE_DIR / "actual_process_feed"
+
+dotenv_path = BASE_DIR / ".env"
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
+
+
+def get_process_dir() -> Path:
+    pd = os.getenv("PROCESS_DIR")
+    if pd:
+        return Path(pd).resolve()
+    return BASE_DIR / "actual_process_feed"
+
+
+PROCESS_DIR = get_process_dir()
 ARTICLE_PATH = PROCESS_DIR / "article.json"
 CONTENT_PATH = PROCESS_DIR / "content.html"
+FAIL_CACHE_PATH = BASE_DIR / "tmp" / "fetch_failures.json"
+FAIL_TTL_SECONDS = 24 * 3600
 
 
 def load_current_article() -> dict:
@@ -43,6 +63,15 @@ def fetch_html(url: str) -> str:
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
     }
+
+    # Sprawdź cache błędów domeny
+    parsed = urlparse(url)
+    domain = parsed.netloc
+    fail_cache = load_fail_cache()
+    if domain in fail_cache:
+        ts = fail_cache[domain]
+        if time.time() - ts < FAIL_TTL_SECONDS:
+            raise requests.RequestException(f"Pomijam {domain} – ostatnio błąd, cache TTL nie wygasł.")
 
     resp = requests.get(url, timeout=30, headers=headers)
     resp.raise_for_status()
@@ -198,15 +227,19 @@ def main() -> None:
         print("Brak pola 'url' w article.json – pomijam.")
         return
 
+    PROCESS_DIR.mkdir(parents=True, exist_ok=True)
+
     print(f"[download_feed] Pobieram HTML z: {url}")
     try:
         html = fetch_html(url)
     except requests.HTTPError as exc:
         status = getattr(exc.response, "status_code", "?")
         print(f"[download_feed] HTTP error {status} dla URL: {url} – pomijam ten wpis.")
+        remember_fail(url)
         return
     except requests.RequestException as exc:
         print(f"[download_feed] Błąd sieci podczas pobierania {url}: {exc} – pomijam ten wpis.")
+        remember_fail(url)
         return
     cleaned = strip_styles_and_scripts(html)
     # Wyłuskaj główną treść, korzystając z tytułu jako nagłówka
@@ -218,6 +251,28 @@ def main() -> None:
         f.write(main_html)
 
     print(f"[download_feed] Zapisano wyczyszczony HTML do {CONTENT_PATH}")
+
+
+def load_fail_cache() -> dict:
+    if not FAIL_CACHE_PATH.exists():
+        return {}
+    try:
+        return json.loads(FAIL_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_fail_cache(cache: dict) -> None:
+    FAIL_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    FAIL_CACHE_PATH.write_text(json.dumps(cache), encoding="utf-8")
+
+
+def remember_fail(url: str) -> None:
+    parsed = urlparse(url)
+    domain = parsed.netloc
+    cache = load_fail_cache()
+    cache[domain] = time.time()
+    save_fail_cache(cache)
 
 
 if __name__ == "__main__":

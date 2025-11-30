@@ -15,6 +15,10 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Any, Set
+from difflib import SequenceMatcher
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import os
+from dotenv import load_dotenv
 
 import feedparser  # type: ignore
 import yaml  # type: ignore
@@ -23,6 +27,10 @@ import yaml  # type: ignore
 BASE_DIR = Path(__file__).resolve().parent
 SOURCES_FILE = BASE_DIR / "sources.yaml"
 FEEDS_DIR = BASE_DIR / "feeds"
+
+dotenv_path = BASE_DIR / ".env"
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
 
 
 @dataclass
@@ -107,43 +115,94 @@ def load_existing_ids(path: Path) -> Set[str]:
     return ids
 
 
+def load_existing_titles(path: Path) -> List[str]:
+    titles: List[str] = []
+    if not path.exists():
+        return titles
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            title = obj.get("title")
+            if title:
+                titles.append(str(title))
+    return titles
+
+
+def similar_title(title: str, existing: List[str], threshold: float = 0.9) -> bool:
+    for other in existing:
+        if not other:
+            continue
+        ratio = SequenceMatcher(None, title.lower(), other.lower()).ratio()
+        if ratio >= threshold:
+            return True
+    return False
+
+
 def append_entries(path: Path, entries: List[FeedEntry]) -> int:
     """Dopisuje nowe wpisy do pliku JSONL. Zwraca liczbę dopisanych wpisów."""
     FEEDS_DIR.mkdir(parents=True, exist_ok=True)
     existing_ids = load_existing_ids(path)
+    existing_titles = load_existing_titles(path)
 
     appended = 0
     with path.open("a", encoding="utf-8") as f:
         for e in entries:
             if e.id in existing_ids:
                 continue
+            if e.title and similar_title(e.title, existing_titles):
+                continue
             f.write(json.dumps(asdict(e), ensure_ascii=False) + "\n")
             existing_ids.add(e.id)
+            if e.title:
+                existing_titles.append(e.title)
             appended += 1
     return appended
+
+
+def process_source(source: Dict[str, Any], verbose: bool = True) -> tuple[str, int]:
+    name = source["name"]
+    url = source["url"]
+    slug = slugify(name)
+    out_path = FEEDS_DIR / f"{slug}.jsonl"
+
+    if verbose:
+        print(f"== {name} ({url}) => {out_path}")
+
+    feed = feedparser.parse(url)
+    entries = [parse_entry(name, entry) for entry in feed.entries]
+
+    added = append_entries(out_path, entries)
+    if verbose:
+        print(f"   dodano {added} nowych wpisów (łącznie w pliku: {len(load_existing_ids(out_path))})")
+    return name, added
 
 
 def download_all(verbose: bool = True) -> None:
     sources = load_sources()
     FEEDS_DIR.mkdir(parents=True, exist_ok=True)
 
-    for source in sources:
-        name = source["name"]
-        url = source["url"]
-        slug = slugify(name)
-        out_path = FEEDS_DIR / f"{slug}.jsonl"
+    workers = int(os.getenv("FEED_DOWNLOAD_WORKERS", "4"))
 
-        if verbose:
-            print(f"== {name} ({url}) => {out_path}")
+    if workers <= 1:
+        for source in sources:
+            process_source(source, verbose=verbose)
+        return
 
-        feed = feedparser.parse(url)
-        entries = [parse_entry(name, entry) for entry in feed.entries]
-
-        added = append_entries(out_path, entries)
-        if verbose:
-            print(f"   dodano {added} nowych wpisów (łącznie w pliku: {len(load_existing_ids(out_path))})")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {executor.submit(process_source, source, verbose): source for source in sources}
+        for future in as_completed(futures):
+            try:
+                future.result()
+            except Exception as exc:
+                src = futures[future].get("name")
+                print(f"!! Błąd podczas pobierania {src}: {exc}")
 
 
 if __name__ == "__main__":
     download_all(verbose=True)
-
