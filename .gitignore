@@ -1,9 +1,28 @@
+# Environment
 .env
-*.jsonl
 .venv
+venv/
+
+# JSONL files
+*.jsonl
+
+# RSS feed outputs
 feeds/*.jsonl
 actual_process_feed/*
+
+# Temp files
 tmp/
+
+# Config
 sources.yaml
-.idea
-knowever_rss_digest.egg-info
+
+# IDE garbage
+.idea/
+*.iml
+
+# Python build metadata
+knowever_rss_digest.egg-info/
+dist/
+build/
+__pycache__/
+*.pyc
