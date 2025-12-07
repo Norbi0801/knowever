@@ -1,5 +1,10 @@
 # knowever
 
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](#requirements)
+[![uv managed](https://img.shields.io/badge/Deps-uv%20sync-3f6ad8.svg)](#installation)
+[![Status](https://img.shields.io/badge/Status-Experimental-orange.svg)](#overview)
+[![Platform](https://img.shields.io/badge/Platform-linux%20%7C%20macOS%20%7C%20WSL-0f172a.svg)](#requirements)
+
 > RSS -> AI -> email digest pipeline as a tiny CLI.
 
 ## Contents
