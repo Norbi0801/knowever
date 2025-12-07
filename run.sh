@@ -25,6 +25,7 @@ LOG_FILE="${LOG_DIR}/run_${TIMESTAMP}.log"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-${BASE_DIR}/.cache}"
 export XDG_STATE_HOME="${XDG_STATE_HOME:-${BASE_DIR}/.local/state}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${XDG_CACHE_HOME}/uv}"
+export PYTHONPATH="${BASE_DIR}/src:${PYTHONPATH:-}"
 mkdir -p "$XDG_CACHE_HOME" "$XDG_STATE_HOME" "$UV_CACHE_DIR"
 
 # Load environment (SMTP, limits, flags)
@@ -42,7 +43,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 {
-  echo "[${TIMESTAMP}] starting pipeline (uv run rss.py)"
-  uv run rss.py
+  echo "[${TIMESTAMP}] starting pipeline (uv run -m knowever.cli run)"
+  uv run -m knowever.cli run
   echo "[${TIMESTAMP}] finished."
 } | tee -a "$LOG_FILE"

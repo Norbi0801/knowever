@@ -1,7 +1,7 @@
 [project]
 name = "knowever-rss-digest"
 version = "0.1.0"
-description = "Prosty downloader RSS pod Codex – pobiera feedy do plików JSONL."
+description = "Simple RSS downloader for Codex - fetches feeds into JSONL files."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -13,4 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-rss-download = "rss_download:download_all"
+knowever = "knowever.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

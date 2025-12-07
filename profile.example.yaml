@@ -1,0 +1,14 @@
+# Copy this file to profile.yaml and adjust to your preferences.
+# Each profile is a map with scoring limits and keyword hints used in rss_process.py.
+
+- name: default
+  min_score: 0.5          # minimum score to keep an entry
+  max_per_source: 2        # per-source daily cap
+  keywords_positive:
+    - ai
+    - python
+    - infrastructure
+  keywords_negative:
+    - crypto
+    - celebrity
+  send_time: "17:00"      # used for digest metadata only
